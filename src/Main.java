@@ -1,71 +1,112 @@
+import java.util.Arrays;
+import java.util.Locale;
+
+/**
+ * Educational multi-criteria neighborhood ranking with fixed weights and Softmax.
+ * The inputs are synthetic; this does not train a model or calculate real routes.
+ */
 public class Main {
-    public static void main(String[] args) {
-        // Mahalleleri içeren bir dizi oluşturduk.
-        String[] mahalleler = {"İstasyon Mahallesi", "Karakaş Mahallesi", "Pınar Mahallesi"};
+    // Population, transport infrastructure, cost, environmental impact, social benefit.
+    private static final double[] WEIGHTS = {0.30, 0.20, -0.10, 0.20, 0.20};
 
-        // Her mahalle için 5 kriterden oluşan bir dizi oluşturduk. 3 mahalle ve 5 kriter olduğu için 3x5'lik bir 2D dizi tanımlıyoruz.
-        double[][] kriterler = new double[3][5]; // 3 mahalle, 5 kriter
-
-        // Mahalle kriterleri için 100 üzerinden sentetik verileri tanımladık.
-        kriterler[0] = new double[]{80, 75, 60, 70, 85}; // İstasyon Mahallesi
-        kriterler[1] = new double[]{70, 65, 55, 80, 75}; // Karakaş Mahallesi
-        kriterler[2] = new double[]{85, 80, 50, 75, 70}; // Pınar Mahallesi
-
-        // Softmax hesaplaması için bir dizi tanımlıyoruz.
-        double[] puanlar = new double[3]; // 3 mahalle için puanlar
-        double toplamExp = 0; // Üssel değerlerin toplamını tutan değişken
-
-        // Her mahalle için Softmax puanı hesaplıyoruz.
-        for (int i = 0; i < 3; i++) {
-            puanlar[i] = softmaxPuan(kriterler[i]); // Softmax puanı hesaplanıyor
-            toplamExp += Math.exp(puanlar[i]); // Üssel değerler toplama ekleniyor
+    /** Computes a weighted score from five synthetic 0..100 criteria. */
+    public static double weightedScore(double[] criteria) {
+        if (criteria == null || criteria.length != WEIGHTS.length) {
+            throw new IllegalArgumentException("Exactly five criteria are required.");
         }
 
-        // Normalizasyon ve yüzdelik hesaplama
-        double[] yuzdeler = new double[3]; // Yüzdelik değerleri tutan dizi
-        double enYuksekPuan = Double.MIN_VALUE; // En yüksek puanı tutmak için değişken
-        int enUygunMahalleIndeksi = -1; // En uygun mahalleyi belirlemek için değişken
-
-        // Her mahalle için yüzdelik skor hesaplıyoruz.
-        for (int i = 0; i < 3; i++) {
-            yuzdeler[i] = (Math.exp(puanlar[i]) / toplamExp) * 100; // Yüzdelik hesaplanıyor
-            if (yuzdeler[i] > enYuksekPuan) {
-                enYuksekPuan = yuzdeler[i]; // En yüksek yüzdelik puan belirleniyor
-                enUygunMahalleIndeksi = i; // En uygun mahalle indeksi belirleniyor
+        double score = 0.0;
+        for (int i = 0; i < WEIGHTS.length; i++) {
+            if (!Double.isFinite(criteria[i]) || criteria[i] < 0 || criteria[i] > 100) {
+                throw new IllegalArgumentException("Each criterion must be finite and within [0, 100].");
             }
+            score += criteria[i] * WEIGHTS[i];
         }
-
-        // Sonuçları yazdırıyoruz.
-        System.out.println("Kırklareli Toplu Taşıma Güzergah Planlaması Sonuçları:");
-        for (int i = 0; i < 3; i++) {
-            double toplamFayda = kriterler[i][0] + kriterler[i][1] + kriterler[i][3] + kriterler[i][4];
-            double maliyet = kriterler[i][2];
-            System.out.println("----------------------------------------------------");
-            System.out.println("Mahalle: " + mahalleler[i]);
-            System.out.println("  Nüfus Yoğunluğu: " + kriterler[i][0]);
-            System.out.println("  Ulaşım Altyapısı: " + kriterler[i][1]);
-            System.out.println("  Maliyet: " + kriterler[i][2]);
-            System.out.println("  Çevresel Etki: " + kriterler[i][3]);
-            System.out.println("  Sosyal Fayda: " + kriterler[i][4]);
-            System.out.printf("  Toplam Fayda: %.1f, Maliyet: %.1f%n", toplamFayda, maliyet);
-            System.out.printf("  Yüzdelik Skor: %.2f%%%n", yuzdeler[i]);
-        }
-
-        System.out.println("----------------------------------------------------");
-        System.out.println("En uygun güzergah: " + mahalleler[enUygunMahalleIndeksi] + " (Yüzdelik Skor: " + String.format("%.2f", enYuksekPuan) + "%)");
+        return score;
     }
 
-    // Softmax puanını hesaplayan metot
-    public static double softmaxPuan(double[] kriterler) {
-        // Her kriter için ağırlıkları tanımlıyoruz
-        double agirlikNufus = 0.3;
-        double agirlikUlasim = 0.2;
-        double agirlikMaliyet = -0.1; // Maliyet negatif etki yaratır
-        double agirlikCevre = 0.2;
-        double agirlikSosyal = 0.2;
+    /**
+     * Converts finite scores to non-negative shares that sum to 1.
+     * Subtracting the maximum scaled score avoids overflow in exp().
+     */
+    public static double[] softmax(double[] scores, double temperature) {
+        if (scores == null || scores.length == 0) {
+            throw new IllegalArgumentException("At least one score is required.");
+        }
+        if (!Double.isFinite(temperature) || temperature <= 0) {
+            throw new IllegalArgumentException("Temperature must be positive and finite.");
+        }
 
-        // Kriterler ile ağırlıkları çarpıp topluyoruz.
-        return (kriterler[0] * agirlikNufus + kriterler[1] * agirlikUlasim + kriterler[2] * agirlikMaliyet +
-                kriterler[3] * agirlikCevre + kriterler[4] * agirlikSosyal);
+        double[] scaled = new double[scores.length];
+        double max = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < scores.length; i++) {
+            scaled[i] = scores[i] / temperature;
+            if (!Double.isFinite(scaled[i])) {
+                throw new IllegalArgumentException("Scores must yield finite scaled values.");
+            }
+            max = Math.max(max, scaled[i]);
+        }
+
+        double sum = 0.0;
+        double[] shares = new double[scores.length];
+        for (int i = 0; i < shares.length; i++) {
+            shares[i] = Math.exp(scaled[i] - max);
+            sum += shares[i];
+        }
+        for (int i = 0; i < shares.length; i++) {
+            shares[i] /= sum;
+        }
+        return shares;
+    }
+
+    private static double readTemperature(String[] args) {
+        if (args.length == 0) {
+            return 1.0;
+        }
+        if (args.length != 2 || !"--temperature".equals(args[0])) {
+            throw new IllegalArgumentException("Usage: java -cp out Main [--temperature <positive-number>]");
+        }
+        try {
+            double value = Double.parseDouble(args[1]);
+            if (!Double.isFinite(value) || value <= 0) {
+                throw new IllegalArgumentException("Temperature must be positive and finite.");
+            }
+            return value;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("Temperature must be a valid number.", exception);
+        }
+    }
+
+    public static void main(String[] args) {
+        double temperature = readTemperature(args);
+
+        String[] neighborhoods = {
+                "İstasyon Mahallesi", "Karakaş Mahallesi", "Pınar Mahallesi"
+        };
+        // Synthetic examples; not observations or official Kırklareli transport data.
+        double[][] criteria = {
+                {80, 75, 60, 70, 85},
+                {70, 65, 55, 80, 75},
+                {85, 80, 50, 75, 70}
+        };
+
+        double[] scores = new double[neighborhoods.length];
+        for (int i = 0; i < neighborhoods.length; i++) {
+            scores[i] = weightedScore(criteria[i]);
+        }
+        double[] shares = softmax(scores, temperature);
+
+        Integer[] order = {0, 1, 2};
+        Arrays.sort(order, (a, b) -> Double.compare(shares[b], shares[a]));
+
+        System.out.println("Kırklareli Neighborhood Ranking (synthetic data)");
+        System.out.printf(Locale.US, "Softmax temperature: %.1f%n", temperature);
+        System.out.println("Rank | Neighborhood       | Weighted score | Softmax share");
+        for (int rank = 0; rank < order.length; rank++) {
+            int i = order[rank];
+            System.out.printf(Locale.US, "%4d | %-18s | %14.2f | %12.2f%%%n",
+                    rank + 1, neighborhoods[i], scores[i], shares[i] * 100);
+        }
+        System.out.println("Note: Softmax shares are not validated probabilities or actual route quality.");
     }
 }
